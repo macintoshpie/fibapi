@@ -12,7 +12,7 @@ import (
 
 type response struct {
 	Index uint32 `json:"index"`
-	Value uint64 `json:"value"`
+	Value string `json:"value"`
 }
 
 type server struct {
@@ -28,7 +28,7 @@ func makeServer(fib *FibTracker) *server {
 func (s *server) handleGetCurrent() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := s.currentIndex
-		resp := response{idx, s.fib.Get(idx)}
+		resp := response{idx, s.fib.Get(idx).String()}
 		responseEncoder := json.NewEncoder(w)
 		if err := responseEncoder.Encode(resp); err != nil {
 			http.Error(w, "Server error", http.StatusInternalServerError)
@@ -40,7 +40,7 @@ func (s *server) handleGetCurrent() http.HandlerFunc {
 func (s *server) handleSetNext() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := atomic.AddUint32(&s.currentIndex, 1)
-		resp := response{idx, s.fib.Get(idx)}
+		resp := response{idx, s.fib.Get(idx).String()}
 		responseEncoder := json.NewEncoder(w)
 		if err := responseEncoder.Encode(resp); err != nil {
 			http.Error(w, "Server error", http.StatusInternalServerError)
@@ -55,7 +55,7 @@ func (s *server) handleSetPrevious() http.HandlerFunc {
 		if s.currentIndex > 0 {
 			idx = atomic.AddUint32(&s.currentIndex, ^uint32(0))
 		}
-		resp := response{idx, s.fib.Get(idx)}
+		resp := response{idx, s.fib.Get(idx).String()}
 		responseEncoder := json.NewEncoder(w)
 		if err := responseEncoder.Encode(resp); err != nil {
 			http.Error(w, "Server error", http.StatusInternalServerError)
@@ -81,8 +81,8 @@ func main() {
 
 	fmt.Println(backup)
 
-	// occasionally call backup in a goroutine (journaling/transaction log)
-	fib := MakeFibTracker().WithInitializedStore(3)
+	// TODO: occasionally call backup in a goroutine (journaling/transaction log)
+	fib := MakeFibTracker().WithInitializedStore(100000)
 	fibServer := makeServer(fib)
 	router := fibServer.makeRouter()
 	address := fmt.Sprintf(":%d", *port)
