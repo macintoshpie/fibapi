@@ -48,6 +48,32 @@ func (c *hashicorpCache) Set(idx uint32, pair fibPair) error {
 	return nil
 }
 
+type scEntry struct {
+	idx  uint32
+	pair fibPair
+}
+
+type sliceCache []scEntry
+
+func MakeSliceCache(size int) (fibCache, error) {
+	var sc sliceCache = make([]scEntry, size)
+	sc[0] = scEntry{0, fibPair{big.NewInt(0), big.NewInt(1)}}
+	return &sc, nil
+}
+
+func (c *sliceCache) Get(idx uint32) (fibPair, error) {
+	entry := (*c)[idx%uint32(len(*c))]
+	if entry.idx == idx {
+		return entry.pair, nil
+	}
+	return fibPair{}, notFound
+}
+
+func (c *sliceCache) Set(idx uint32, pair fibPair) error {
+	(*c)[idx%uint32(len(*c))] = scEntry{idx, pair}
+	return nil
+}
+
 // stores fibonacci values for the ith and i+1th positions
 type fibPair struct {
 	i *big.Int // ith position
@@ -136,7 +162,7 @@ func (fib *FibTracker) Get(idx uint32) *big.Int {
 	// try to get nearest value that's cached
 	// TODO: improve this by using BST and finding first node < idx? Would probably require locks...
 	closeIndex := fib.roundDownToPad(idx)
-	for i := 0; i < 10 && closeIndex < idx; i += 1 {
+	for i := 0; i < 10 && closeIndex <= idx; i += 1 {
 		pair, err := fib.cache.Get(closeIndex)
 		if err == nil {
 			// calculate our value from this pair

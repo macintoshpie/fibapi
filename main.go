@@ -82,7 +82,7 @@ func main() {
 	fmt.Println(backup)
 
 	// TODO: occasionally call backup in a goroutine (journaling/transaction log)
-	hc, err := MakeHashicorpCache(1000)
+	hc, err := MakeSliceCache(1000)
 	if err != nil {
 		log.Fatal(err)
 	}

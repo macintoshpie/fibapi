@@ -4,8 +4,6 @@ import (
 	"math/big"
 	"strconv"
 	"testing"
-
-	lru "github.com/hashicorp/golang-lru"
 )
 
 var fibTests = []struct {
@@ -22,6 +20,8 @@ var fibTests = []struct {
 	{7, "13"},
 	{8, "21"},
 	{9, "34"},
+	{10, "55"},
+	{11, "89"},
 	{50, "12586269025"},
 	{75, "2111485077978050"},
 	{100, "354224848179261915075"},
@@ -30,7 +30,7 @@ var fibTests = []struct {
 
 func TestCalcFromZero(t *testing.T) {
 	testCachePad := uint32(10)
-	hc, err := MakeHashicorpCache(100)
+	hc, err := MakeSliceCache(100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,16 +79,13 @@ func benchmarkSetNextN(nIter uint32, b *testing.B) {
 	var err error
 	var val *big.Int
 	for n := 0; n < b.N; n++ {
-		hc, err = MakeHashicorpCache(100)
+		hc, err = MakeSliceCache(100)
 		if err != nil {
 			b.Fatal(err)
 		}
 		fib, err = MakeFibTracker(10, hc)
 		if err != nil {
 			b.Fatal(err)
-		}
-		if err != nil {
-			b.Error(err)
 		}
 		for i := uint32(0); i < nIter; i++ {
 			val = fib.Get(i)
@@ -98,17 +95,17 @@ func benchmarkSetNextN(nIter uint32, b *testing.B) {
 	result = val
 }
 
-// func BenchmarkSetNext10(b *testing.B) {
-// 	benchmarkSetNextN(10, b)
-// }
+func BenchmarkSetNext10(b *testing.B) {
+	benchmarkSetNextN(10, b)
+}
 
-// func BenchmarkSetNext100(b *testing.B) {
-// 	benchmarkSetNextN(100, b)
-// }
+func BenchmarkSetNext100(b *testing.B) {
+	benchmarkSetNextN(100, b)
+}
 
-// func BenchmarkSetNext1000(b *testing.B) {
-// 	benchmarkSetNextN(1000, b)
-// }
+func BenchmarkSetNext1000(b *testing.B) {
+	benchmarkSetNextN(1000, b)
+}
 
 // func BenchmarkSync(b *testing.B) {
 // 	var s sync.Mutex
@@ -118,28 +115,28 @@ func benchmarkSetNextN(nIter uint32, b *testing.B) {
 // 	}
 // }
 
-func benchmarkHashicorpCacheN(size, nIter int, b *testing.B) {
-	var c *lru.Cache
-	var err error
-	for n := 0; n < b.N; n++ {
-		c, err = lru.New(size)
-		if err != nil {
-			b.Fatal(err)
-		}
-		for i := 0; i < nIter; i++ {
-			c.Add(i, i)
-		}
-	}
-}
+// func benchmarkHashicorpCacheN(size, nIter int, b *testing.B) {
+// 	var c *lru.Cache
+// 	var err error
+// 	for n := 0; n < b.N; n++ {
+// 		c, err = lru.New(size)
+// 		if err != nil {
+// 			b.Fatal(err)
+// 		}
+// 		for i := 0; i < nIter; i++ {
+// 			c.Add(i, i)
+// 		}
+// 	}
+// }
 
-func BenchmarkHashicorpCache10(b *testing.B) {
-	benchmarkHashicorpCacheN(10, 10, b)
-}
+// func BenchmarkHashicorpCache10(b *testing.B) {
+// 	benchmarkHashicorpCacheN(10, 10, b)
+// }
 
-func BenchmarkHashicorpCache100(b *testing.B) {
-	benchmarkHashicorpCacheN(10, 100, b)
-}
+// func BenchmarkHashicorpCache100(b *testing.B) {
+// 	benchmarkHashicorpCacheN(10, 100, b)
+// }
 
-func BenchmarkHashicorpCache1000(b *testing.B) {
-	benchmarkHashicorpCacheN(10, 1000, b)
-}
+// func BenchmarkHashicorpCache1000(b *testing.B) {
+// 	benchmarkHashicorpCacheN(10, 1000, b)
+// }
