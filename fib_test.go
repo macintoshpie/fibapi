@@ -95,16 +95,16 @@ func benchmarkSetNextN(nIter uint32, b *testing.B) {
 	result = val
 }
 
-func BenchmarkSetNext10(b *testing.B) {
-	benchmarkSetNextN(10, b)
-}
-
-func BenchmarkSetNext100(b *testing.B) {
-	benchmarkSetNextN(100, b)
-}
-
 func BenchmarkSetNext1000(b *testing.B) {
 	benchmarkSetNextN(1000, b)
+}
+
+func BenchmarkSetNext10000(b *testing.B) {
+	benchmarkSetNextN(10000, b)
+}
+
+func BenchmarkSetNext100000(b *testing.B) {
+	benchmarkSetNextN(100000, b)
 }
 
 // func BenchmarkSync(b *testing.B) {
