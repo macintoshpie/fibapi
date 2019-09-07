@@ -1,96 +1,152 @@
 package main
 
 import (
+	"errors"
 	"math"
 	"math/big"
-	"sync"
+
+	"github.com/hashicorp/golang-lru"
 )
 
-const storeSize = 1000000 // 1,000,000
-
 // Struct for caching fibonacci numbers
+// The cache stores pairs of indices and their corresponding fibonacci values
 type FibTracker struct {
-	lastIndex       uint32
-	store           [storeSize]*big.Int
-	updatingStore   bool
-	storeStatusLock *sync.Mutex
-	lock            *sync.Mutex
-	cond            *sync.Cond
+	cachePad uint32   // # of non-cached entries between each cached entry (ie caching interval)
+	cache    fibCache // lru cache
+}
+
+type fibCache interface {
+	Get(uint32) (fibPair, error)
+	Set(uint32, fibPair) error
+}
+
+var notFound error = errors.New("Not in cache")
+
+type hashicorpCache struct {
+	cache *lru.Cache
+}
+
+func MakeHashicorpCache(size int) (fibCache, error) {
+	hc, err := lru.New(size)
+	if err != nil {
+		return &hashicorpCache{}, err
+	}
+	return &hashicorpCache{hc}, nil
+}
+
+func (c *hashicorpCache) Get(idx uint32) (fibPair, error) {
+	pair, ok := c.cache.Get(idx)
+	if ok == false {
+		return fibPair{}, notFound
+	}
+
+	return pair.(fibPair), nil
+}
+
+func (c *hashicorpCache) Set(idx uint32, pair fibPair) error {
+	c.cache.Add(idx, pair)
+	return nil
+}
+
+// stores fibonacci values for the ith and i+1th positions
+type fibPair struct {
+	i *big.Int // ith position
+	j *big.Int // i+1th position
 }
 
 // Create a new FibTracker
-func MakeFibTracker() *FibTracker {
-	statusLock := &sync.Mutex{}
-	condLock := &sync.Mutex{}
-	// initialize store
-	store := [storeSize]*big.Int{}
-	for i := 0; i < storeSize; i += 1 {
-		store[i] = big.NewInt(0)
-	}
-	fib := &FibTracker{1, store, false, statusLock, condLock, sync.NewCond(condLock)}
-	fib.store[1].SetInt64(1)
-	return fib
+func MakeFibTracker(cachePad int, cache fibCache) (*FibTracker, error) {
+	return &FibTracker{uint32(cachePad), cache}, nil
 }
 
-func (fib *FibTracker) WithInitializedStore(nInit uint32) *FibTracker {
-	nInit = uint32(math.Min(math.Max(2, float64(nInit)), storeSize))
-	for i := uint32(2); i < nInit; i++ {
-		fib.store[i].Add(fib.store[i-1], fib.store[i-2])
-	}
-	fib.lastIndex = nInit - 1
-	return fib
-}
-
-// Increase the size of store
-func (fib *FibTracker) extendStore(includeIndex uint32) {
-	if fib.lastIndex+1 == storeSize {
-		return
-	}
-
-	// check if someone else is already updating the store, or if it's been updated to include our index
-	fib.storeStatusLock.Lock()
-	if fib.updatingStore || fib.lastIndex >= includeIndex {
-		fib.storeStatusLock.Unlock()
-		return
-	}
-	fib.updatingStore = true
-	fib.storeStatusLock.Unlock()
-
-	// update store
-	newLen := uint32(math.Min(float64(includeIndex+3000), float64(storeSize)))
-	for i := fib.lastIndex + 1; i < newLen; i += 1 {
-		fib.store[i].Add(fib.store[i-1], fib.store[i-2])
-	}
-
-	fib.storeStatusLock.Lock()
-	fib.lastIndex = newLen - 1
-	fib.updatingStore = false
-	fib.storeStatusLock.Unlock()
-}
-
-// calculate a fib number at targetIndex starting at startIdx using store
-func (fib *FibTracker) calcFromIndex(startIdx uint32, targetIdx uint32) *big.Int {
-	n1 := big.NewInt(0).Set(fib.store[startIdx-1])
-	n2 := big.NewInt(0).Set(fib.store[startIdx-2])
-	nIter := targetIdx - startIdx + 1
-	for i := uint32(0); i < nIter; i++ {
+// initialize fibtracker cache with some precalculated values
+func (fib *FibTracker) WithInitializedStore(nInit int) *FibTracker {
+	nInit = int(math.Max(2, float64(nInit)))
+	n1 := big.NewInt(0)
+	n2 := big.NewInt(1)
+	nCached := 0
+	i := uint32(2)
+	for nCached < nInit {
 		n2.Add(n2, n1)
 		n1, n2 = n2, n1
+		if i%fib.cachePad == 0 {
+			fib.cache.Set(i, fibPair{n1, n2})
+			nCached += 1
+		}
+		i += 1
+	}
+	return fib
+}
+
+func (fib *FibTracker) calcFromZero(idx uint32) *big.Int {
+	basePair := fibPair{big.NewInt(0), big.NewInt(1)}
+	return fib.calcFromPair(0, basePair, idx)
+}
+
+func (fib *FibTracker) calcFromPair(pairIdx uint32, pair fibPair, idx uint32) *big.Int {
+	// check if idx is actually in our pair
+	if pairIdx == idx {
+		return pair.i
+	} else if pairIdx+1 == idx {
+		return pair.j
+	}
+
+	// calculate idx, caching as we go
+	n1 := big.NewInt(0).Set(pair.i)
+	n2 := big.NewInt(0).Set(pair.j)
+	for i := pairIdx + 1; i < idx+1; i++ {
+		// TODO:
+		// depending on how large idx is (ie how expensive it is to calculate from zero),
+		// cache some number of values on our way UP to idx
+		n2.Add(n2, n1)
+		n1, n2 = n2, n1
+		if i%fib.cachePad == 0 {
+			fib.cache.Set(i, fibPair{n1, n2})
+		}
 	}
 	return n1
 }
 
+func (fib *FibTracker) roundDownToPad(idx uint32) uint32 {
+	rounded := idx - (idx % fib.cachePad)
+	if rounded > idx {
+		// uint overflow
+		return 0
+	}
+	return rounded
+}
+
 // get value at idx in fibonacci sequence
 func (fib *FibTracker) Get(idx uint32) *big.Int {
-	lastIndex := fib.lastIndex
-	if idx <= lastIndex {
-		return fib.store[idx]
+	// try to get cached value (for i or i+1)
+	if idx%fib.cachePad == 0 {
+		pair, err := fib.cache.Get(idx)
+		if err == nil {
+			// fmt.Println("Hit: idx")
+			return pair.i
+		}
+	} else if (idx-1)%fib.cachePad == 0 {
+		pair, err := fib.cache.Get(idx - 1)
+		if err == nil {
+			// fmt.Println("Hit: idx-1")
+			return pair.j
+		}
 	}
 
-	if lastIndex+1 < storeSize && fib.updatingStore == false {
-		go fib.extendStore(idx)
+	// try to get nearest value that's cached
+	// TODO: improve this by using BST and finding first node < idx? Would probably require locks...
+	closeIndex := fib.roundDownToPad(idx)
+	for i := 0; i < 10 && closeIndex < idx; i += 1 {
+		pair, err := fib.cache.Get(closeIndex)
+		if err == nil {
+			// calculate our value from this pair
+			// fmt.Printf("Hit: %v (original %v)\n", i, idx)
+			return fib.calcFromPair(closeIndex, pair, idx)
+		}
+		closeIndex -= fib.cachePad
 	}
 
-	// FIXME: wasteful - need to use condition variable to wait for update to finish then try again
-	return fib.calcFromIndex(lastIndex+1, idx)
+	// failed to use cache, calculate from zero
+	// fmt.Printf("MISS: %v\n", idx)
+	return fib.calcFromZero(idx)
 }

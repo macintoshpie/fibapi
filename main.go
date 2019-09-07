@@ -82,7 +82,14 @@ func main() {
 	fmt.Println(backup)
 
 	// TODO: occasionally call backup in a goroutine (journaling/transaction log)
-	fib := MakeFibTracker().WithInitializedStore(100000)
+	hc, err := MakeHashicorpCache(1000)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fib, err := MakeFibTracker(10, hc)
+	if err != nil {
+		log.Fatal(err)
+	}
 	fibServer := makeServer(fib)
 	router := fibServer.makeRouter()
 	address := fmt.Sprintf(":%d", *port)
