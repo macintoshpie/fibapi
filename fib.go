@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
+	"sync"
 
 	"github.com/hashicorp/golang-lru"
 )
@@ -58,10 +60,17 @@ type sliceCache []scEntry
 func MakeSliceCache(size int) (fibCache, error) {
 	var sc sliceCache = make([]scEntry, size)
 	sc[0] = scEntry{0, fibPair{big.NewInt(0), big.NewInt(1)}}
+	for i := 1; i < size; i += 1 {
+		sc[i].pair = fibPair{big.NewInt(0), big.NewInt(0)}
+	}
 	return &sc, nil
 }
 
+var scMux = &sync.Mutex{}
+
 func (c *sliceCache) Get(idx uint32) (fibPair, error) {
+	scMux.Lock()
+	defer scMux.Unlock()
 	entry := (*c)[idx%uint32(len(*c))]
 	if entry.idx == idx {
 		return entry.pair, nil
@@ -70,10 +79,12 @@ func (c *sliceCache) Get(idx uint32) (fibPair, error) {
 }
 
 func (c *sliceCache) Set(idx uint32, pair fibPair) error {
-	(*c)[idx%uint32(len(*c))].idx = ^uint32(0)
-	(*c)[idx%uint32(len(*c))].pair.i = pair.i
-	(*c)[idx%uint32(len(*c))].pair.j = pair.j
+	scMux.Lock()
+	defer scMux.Unlock()
+	(*c)[idx%uint32(len(*c))].pair.i.Set(pair.i)
+	(*c)[idx%uint32(len(*c))].pair.j.Set(pair.j)
 	(*c)[idx%uint32(len(*c))].idx = idx
+
 	return nil
 }
 
@@ -119,7 +130,7 @@ func (fib *FibTracker) calcFromPair(pairIdx uint32, pair fibPair, idx uint32) *b
 	// check if idx is actually in our pair
 	if pairIdx == idx {
 		return pair.i
-	} else if pairIdx+1 == idx {
+	} else if pairIdx-1 == idx {
 		return pair.j
 	}
 
@@ -133,6 +144,7 @@ func (fib *FibTracker) calcFromPair(pairIdx uint32, pair fibPair, idx uint32) *b
 		n2.Add(n2, n1)
 		n1, n2 = n2, n1
 		if i%fib.cachePad == 0 {
+			// TODO: call set i / fib.cachePad to make sure we use all indices of the cache
 			fib.cache.Set(i, fibPair{n1, n2})
 		}
 	}
@@ -148,6 +160,12 @@ func (fib *FibTracker) roundDownToPad(idx uint32) uint32 {
 	return rounded
 }
 
+func (fib *FibTracker) printCache() {
+	for i, val := range *fib.cache.(*sliceCache) {
+		fmt.Printf("%v: %v (%v, %v)\n", i, val.idx, val.pair.i, val.pair.j)
+	}
+}
+
 // get value at idx in fibonacci sequence
 func (fib *FibTracker) Get(idx uint32) *big.Int {
 	// try to get cached value (for i or i+1)
@@ -157,10 +175,10 @@ func (fib *FibTracker) Get(idx uint32) *big.Int {
 			// fmt.Println("Hit: idx")
 			return pair.i
 		}
-	} else if (idx-1)%fib.cachePad == 0 {
-		pair, err := fib.cache.Get(idx - 1)
+	} else if (idx+1)%fib.cachePad == 0 {
+		pair, err := fib.cache.Get(idx + 1)
 		if err == nil {
-			// fmt.Println("Hit: idx-1")
+			// fmt.Println("Hit: idx+1")
 			return pair.j
 		}
 	}
@@ -172,7 +190,7 @@ func (fib *FibTracker) Get(idx uint32) *big.Int {
 		pair, err := fib.cache.Get(closeIndex)
 		if err == nil {
 			// calculate our value from this pair
-			// fmt.Printf("Hit: %v (original %v)\n", i, idx)
+			// fmt.Printf("Hit: %v (original %v)\n", closeIndex, idx)
 			return fib.calcFromPair(closeIndex, pair, idx)
 		}
 		closeIndex -= fib.cachePad

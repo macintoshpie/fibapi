@@ -59,6 +59,37 @@ func TestCalcFromZero(t *testing.T) {
 	}
 }
 
+func TestGet(t *testing.T) {
+	testCachePad := uint32(10)
+	hc, err := MakeSliceCache(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fib := MakeFibTracker(int(testCachePad), hc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range fibTests {
+		t.Run(strconv.Itoa(int(tt.index)), func(t *testing.T) {
+			val := fib.Get(tt.index)
+			if val.String() != tt.expected {
+				t.Fatalf("Expected (%v) Got (%v)", tt.expected, val)
+			}
+
+			// if our index was in the right interval, it should be cached with correct values
+			if tt.index != 0 && tt.index%testCachePad == 0 {
+				pair, err := fib.cache.Get(tt.index)
+				if err != nil {
+					t.Fatalf("Expected (idx %v to be in cache) Got (not in cache)", tt.index)
+				}
+				if pair.i.String() != tt.expected {
+					t.Fatalf("Expected (%v) Got (%v)", tt.expected, pair.i)
+				}
+			}
+		})
+	}
+}
+
 // func TestGet(t *testing.T) {
 // 	fib := MakeFibTracker()
 // 	for _, tt := range fibGetTests {
