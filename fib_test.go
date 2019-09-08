@@ -34,7 +34,7 @@ func TestCalcFromZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fib, err := MakeFibTracker(int(testCachePad), hc)
+	fib := MakeFibTracker(int(testCachePad), hc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func benchmarkSetNextN(nIter uint32, b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		fib, err = MakeFibTracker(10, hc)
+		fib = MakeFibTracker(2, hc)
 		if err != nil {
 			b.Fatal(err)
 		}

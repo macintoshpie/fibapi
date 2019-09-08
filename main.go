@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
+	"os"
 	"sync/atomic"
 	"time"
 )
@@ -18,10 +20,12 @@ type response struct {
 type server struct {
 	currentIndex uint32
 	fib          *FibTracker
+	debug        bool
+	backup       *os.File
 }
 
-func makeServer(fib *FibTracker) *server {
-	s := &server{0, fib}
+func makeServer(fib *FibTracker, backup *os.File, debug bool) *server {
+	s := &server{0, fib, debug, backup}
 	return s
 }
 
@@ -52,6 +56,7 @@ func (s *server) handleSetNext() http.HandlerFunc {
 func (s *server) handleSetPrevious() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := uint32(0)
+		// TODO: RECORD idx
 		if s.currentIndex > 0 {
 			idx = atomic.AddUint32(&s.currentIndex, ^uint32(0))
 		}
@@ -71,26 +76,49 @@ func (s *server) makeRouter() http.Handler {
 	router.HandleFunc("/next", s.handleSetNext())
 	router.HandleFunc("/previous", s.handleSetPrevious())
 
+	if s.debug {
+		router.HandleFunc("/debug/pprof/", pprof.Index)
+		router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		router.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		router.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		router.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		router.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		router.Handle("/debug/pprof/block", pprof.Handler("block"))
+	}
 	return router
 }
 
 func main() {
 	var port *uint = flag.Uint("port", 80, "port on which to expose the API")
-	var backup *string = flag.String("backup", "fibapi_backup.txt", "file to backup to")
+	var backupPath *string = flag.String("backup", "fibapi_backup.txt", "file to backup to")
 	flag.Parse()
 
-	fmt.Println(backup)
-
 	// TODO: occasionally call backup in a goroutine (journaling/transaction log)
-	hc, err := MakeSliceCache(1000)
+	hc, err := MakeSliceCache(100000)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fib, err := MakeFibTracker(10, hc)
-	if err != nil {
-		log.Fatal(err)
+	fib := MakeFibTracker(10, hc)
+
+	var backupFile *os.File
+	_, err = os.Stat(*backupPath)
+	if os.IsNotExist(err) {
+		backupFile, err = os.Create(*backupPath)
+		defer backupFile.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		backupFile, err = os.Open(*backupPath)
+		defer backupFile.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-	fibServer := makeServer(fib)
+
+	fibServer := makeServer(fib, backupFile, true)
 	router := fibServer.makeRouter()
 	address := fmt.Sprintf(":%d", *port)
 

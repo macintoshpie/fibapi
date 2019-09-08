@@ -70,7 +70,10 @@ func (c *sliceCache) Get(idx uint32) (fibPair, error) {
 }
 
 func (c *sliceCache) Set(idx uint32, pair fibPair) error {
-	(*c)[idx%uint32(len(*c))] = scEntry{idx, pair}
+	(*c)[idx%uint32(len(*c))].idx = ^uint32(0)
+	(*c)[idx%uint32(len(*c))].pair.i = pair.i
+	(*c)[idx%uint32(len(*c))].pair.j = pair.j
+	(*c)[idx%uint32(len(*c))].idx = idx
 	return nil
 }
 
@@ -81,8 +84,8 @@ type fibPair struct {
 }
 
 // Create a new FibTracker
-func MakeFibTracker(cachePad int, cache fibCache) (*FibTracker, error) {
-	return &FibTracker{uint32(cachePad), cache}, nil
+func MakeFibTracker(cachePad int, cache fibCache) *FibTracker {
+	return &FibTracker{uint32(cachePad), cache}
 }
 
 // initialize fibtracker cache with some precalculated values
@@ -104,8 +107,11 @@ func (fib *FibTracker) WithInitializedStore(nInit int) *FibTracker {
 	return fib
 }
 
+var basePair = fibPair{big.NewInt(0), big.NewInt(1)}
+
 func (fib *FibTracker) calcFromZero(idx uint32) *big.Int {
-	basePair := fibPair{big.NewInt(0), big.NewInt(1)}
+	basePair.i.SetInt64(0)
+	basePair.j.SetInt64(1)
 	return fib.calcFromPair(0, basePair, idx)
 }
 
@@ -160,7 +166,7 @@ func (fib *FibTracker) Get(idx uint32) *big.Int {
 	}
 
 	// try to get nearest value that's cached
-	// TODO: improve this by using BST and finding first node < idx? Would probably require locks...
+	// TODO: improve this by using BST and finding first node < idx? Would probably require some locks
 	closeIndex := fib.roundDownToPad(idx)
 	for i := 0; i < 10 && closeIndex <= idx; i += 1 {
 		pair, err := fib.cache.Get(closeIndex)
