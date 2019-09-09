@@ -25,11 +25,13 @@ type server struct {
 	backup       *os.File
 }
 
+// Make server for fibonacci api
 func makeServer(fib *FibTracker, backup *os.File, debug bool) *server {
 	s := &server{0, fib, debug, backup}
 	return s
 }
 
+// handler for requests for current fibonacci value
 func (s *server) handleGetCurrent() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := s.currentIndex
@@ -42,6 +44,7 @@ func (s *server) handleGetCurrent() http.HandlerFunc {
 	}
 }
 
+// handler for requests for next fibonacci value - increments sequence index and returns value
 func (s *server) handleSetNext() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := atomic.AddUint32(&s.currentIndex, 1)
@@ -54,10 +57,10 @@ func (s *server) handleSetNext() http.HandlerFunc {
 	}
 }
 
+// handler for requests for previous fibonacci value - decrements sequence index and returns value
 func (s *server) handleSetPrevious() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idx := uint32(0)
-		// TODO: RECORD idx
 		if s.currentIndex > 0 {
 			idx = atomic.AddUint32(&s.currentIndex, ^uint32(0))
 		}
@@ -70,6 +73,18 @@ func (s *server) handleSetPrevious() http.HandlerFunc {
 	}
 }
 
+// handler for getting cache hit/miss numbers
+func (s *server) handleGetCacheStats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		responseEncoder := json.NewEncoder(w)
+		if err := responseEncoder.Encode(s.fib.CacheStats); err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// Create router for the fibonacci server
 func (s *server) makeRouter() http.Handler {
 	router := http.NewServeMux()
 
@@ -78,6 +93,7 @@ func (s *server) makeRouter() http.Handler {
 	router.HandleFunc("/previous", s.handleSetPrevious())
 
 	if s.debug {
+		router.HandleFunc("/debug/cache", s.handleGetCacheStats())
 		router.HandleFunc("/debug/pprof/", pprof.Index)
 		router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 		router.HandleFunc("/debug/pprof/profile", pprof.Profile)
@@ -91,36 +107,38 @@ func (s *server) makeRouter() http.Handler {
 	return router
 }
 
-// logs current index on a timer - panics if fails multiple times
+// logs current index on a timer - panics if it fails multiple times
 func (s *server) logCurrentIndex(seconds time.Duration) {
 	ticker := time.NewTicker(seconds)
 	bs := make([]byte, 4)
-	remFails := 3
+	remainingFails := 3
 	for {
 		<-ticker.C
 		binary.LittleEndian.PutUint32(bs, s.currentIndex)
 		_, err := s.backup.WriteAt(bs, 0)
 		if err != nil {
-			remFails -= 1
-			if remFails == 0 {
+			remainingFails -= 1
+			if remainingFails == 0 {
 				log.Fatalf("Failed to write backup: %v (exiting)\n", err)
 			}
-			fmt.Printf("Failed to write backup: %v (%v fails remaining)\n", err, remFails)
+			log.Printf("Failed to write backup: %v (%v fails remaining)\n", err, remainingFails)
 		}
 	}
 }
 
 func main() {
 	var port *uint = flag.Uint("port", 80, "port on which to expose the API")
-	var backupPath *string = flag.String("backup", "fibapi_backup", "file to backup to")
+	var backupPath *string = flag.String("backup", "fibapi_backup", "file to journal sequence index to")
 	flag.Parse()
 
+	// create fibonacci tracker
 	hc, err := MakeSliceCache(100000)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fib := MakeFibTracker(10, hc) // MakeFibTracker(10, hc)
+	fib := MakeFibTracker(10, hc)
 
+	// setup the backup file
 	var backupFile *os.File
 	_, err = os.Stat(*backupPath)
 	if os.IsNotExist(err) {
@@ -137,6 +155,7 @@ func main() {
 		}
 	}
 
+	// create the server and routes
 	fibServer := makeServer(fib, backupFile, true)
 	router := fibServer.makeRouter()
 	address := fmt.Sprintf(":%d", *port)
@@ -148,19 +167,20 @@ func main() {
 		Handler:      router,
 	}
 
-	// set starting index index
+	// set starting index
 	bs := make([]byte, 4)
 	n, err := fibServer.backup.Read(bs)
 	if err != nil || n != 4 {
-		fmt.Printf("Error reading backup: %v\n", err)
-		fmt.Println("Starting index from zero")
+		log.Printf("Failed reading backup: %v\n", err)
+		log.Println("Starting sequence index at zero")
 	} else {
 		fibServer.currentIndex = binary.LittleEndian.Uint32(bs)
-		fmt.Printf("Starting at %v\n", fibServer.currentIndex)
+		log.Printf("Starting sequence index at %v\n", fibServer.currentIndex)
 	}
 
+	// start logger and server
 	go fibServer.logCurrentIndex(3 * time.Second)
 
-	fmt.Printf("Serving at %v\n", address)
+	log.Printf("Serving at %v\n", address)
 	log.Fatal(httpServer.ListenAndServe())
 }

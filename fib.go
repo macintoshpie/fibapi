@@ -6,57 +6,40 @@ import (
 	"math"
 	"math/big"
 	"sync"
-
-	"github.com/hashicorp/golang-lru"
+	"sync/atomic"
 )
 
 // Struct for caching fibonacci numbers
 // The cache stores pairs of indices and their corresponding fibonacci values
 type FibTracker struct {
-	cachePad uint32   // # of non-cached entries between each cached entry (ie caching interval)
-	cache    fibCache // lru cache
+	cachePad   uint32     // # of non-cached entries between each cached entry (ie caching interval)
+	CacheStats CacheStats // tracks cache hit/miss counts
+	cache      fibCache   // lru cache
 }
 
+// interface for a cache usable by the FibTracker
 type fibCache interface {
 	Get(uint32) (fibPair, error)
 	Set(uint32, fibPair) error
 }
 
+type CacheStats struct {
+	NDirectHit uint64 `json:"direct"` // tracks number of direct cache hits (no calculation needed)
+	NCloseHit  uint64 `json:"close"`  // tracks number of close cache hits (some calculation needed)
+	NMiss      uint64 `json:"miss"`   // tracks number of cache misses (full calculation needed)
+}
+
 var notFound error = errors.New("Not in cache")
 
-type hashicorpCache struct {
-	cache *lru.Cache
-}
-
-func MakeHashicorpCache(size int) (fibCache, error) {
-	hc, err := lru.New(size)
-	if err != nil {
-		return &hashicorpCache{}, err
-	}
-	return &hashicorpCache{hc}, nil
-}
-
-func (c *hashicorpCache) Get(idx uint32) (fibPair, error) {
-	pair, ok := c.cache.Get(idx)
-	if ok == false {
-		return fibPair{}, notFound
-	}
-
-	return pair.(fibPair), nil
-}
-
-func (c *hashicorpCache) Set(idx uint32, pair fibPair) error {
-	c.cache.Add(idx, pair)
-	return nil
-}
+// Simple cache (a slice)
+type sliceCache []scEntry
 
 type scEntry struct {
 	idx  uint32
 	pair fibPair
 }
 
-type sliceCache []scEntry
-
+// create a new slice cache
 func MakeSliceCache(size int) (fibCache, error) {
 	var sc sliceCache = make([]scEntry, size)
 	sc[0] = scEntry{0, fibPair{big.NewInt(0), big.NewInt(1)}}
@@ -66,6 +49,7 @@ func MakeSliceCache(size int) (fibCache, error) {
 	return &sc, nil
 }
 
+// TODO: refactor sliceCache to include mux
 var scMux = &sync.Mutex{}
 
 func (c *sliceCache) Get(idx uint32) (fibPair, error) {
@@ -78,9 +62,11 @@ func (c *sliceCache) Get(idx uint32) (fibPair, error) {
 	return fibPair{}, notFound
 }
 
+// Set key idx to pair
 func (c *sliceCache) Set(idx uint32, pair fibPair) error {
 	scMux.Lock()
 	defer scMux.Unlock()
+	// TODO: add a comparison of idx - if already equal there's no need to update
 	(*c)[idx%uint32(len(*c))].pair.i.Set(pair.i)
 	(*c)[idx%uint32(len(*c))].pair.j.Set(pair.j)
 	(*c)[idx%uint32(len(*c))].idx = idx
@@ -96,36 +82,42 @@ type fibPair struct {
 
 // Create a new FibTracker
 func MakeFibTracker(cachePad int, cache fibCache) *FibTracker {
-	return &FibTracker{uint32(cachePad), cache}
+	return &FibTracker{
+		cachePad:   uint32(cachePad),
+		CacheStats: CacheStats{0, 0, 0},
+		cache:      cache,
+	}
+}
+
+func (fib *FibTracker) countHit() {
+	atomic.AddUint64(&fib.CacheStats.NDirectHit, 1)
+}
+
+func (fib *FibTracker) countClose() {
+	atomic.AddUint64(&fib.CacheStats.NCloseHit, 1)
+}
+
+func (fib *FibTracker) countMiss() {
+	atomic.AddUint64(&fib.CacheStats.NMiss, 1)
 }
 
 // initialize fibtracker cache with some precalculated values
-func (fib *FibTracker) WithInitializedStore(nInit int) *FibTracker {
-	nInit = int(math.Max(2, float64(nInit)))
-	n1 := big.NewInt(0)
-	n2 := big.NewInt(1)
-	nCached := 0
-	i := uint32(2)
-	for nCached < nInit {
-		n2.Add(n2, n1)
-		n1, n2 = n2, n1
-		if i%fib.cachePad == 0 {
-			fib.cache.Set(i, fibPair{n1, n2})
-			nCached += 1
-		}
-		i += 1
-	}
+func (fib *FibTracker) WithInitializedStore(nInit uint32) *FibTracker {
+	nInit = uint32(math.Max(2, float64(nInit)))
+	fib.Get(nInit)
 	return fib
 }
 
 var basePair = fibPair{big.NewInt(0), big.NewInt(1)}
 
+// calculate fib number starting from 0 and 1
 func (fib *FibTracker) calcFromZero(idx uint32) *big.Int {
 	basePair.i.SetInt64(0)
 	basePair.j.SetInt64(1)
 	return fib.calcFromPair(0, basePair, idx)
 }
 
+// calculate fib number starting from provided pair
 func (fib *FibTracker) calcFromPair(pairIdx uint32, pair fibPair, idx uint32) *big.Int {
 	// check if idx is actually in our pair
 	if pairIdx == idx {
@@ -151,15 +143,16 @@ func (fib *FibTracker) calcFromPair(pairIdx uint32, pair fibPair, idx uint32) *b
 	return n1
 }
 
+// round idx down to nearest cachePad interval
 func (fib *FibTracker) roundDownToPad(idx uint32) uint32 {
 	rounded := idx - (idx % fib.cachePad)
 	if rounded > idx {
-		// uint overflow
 		return 0
 	}
 	return rounded
 }
 
+// print contents of cache, useful for debugging
 func (fib *FibTracker) printCache() {
 	for i, val := range *fib.cache.(*sliceCache) {
 		fmt.Printf("%v: %v (%v, %v)\n", i, val.idx, val.pair.i, val.pair.j)
@@ -172,31 +165,30 @@ func (fib *FibTracker) Get(idx uint32) *big.Int {
 	if idx%fib.cachePad == 0 {
 		pair, err := fib.cache.Get(idx)
 		if err == nil {
-			// fmt.Println("Hit: idx")
+			fib.countHit()
 			return pair.i
 		}
 	} else if (idx+1)%fib.cachePad == 0 {
 		pair, err := fib.cache.Get(idx + 1)
 		if err == nil {
-			// fmt.Println("Hit: idx+1")
+			fib.countHit()
 			return pair.j
 		}
 	}
 
-	// try to get nearest value that's cached
-	// TODO: improve this by using BST and finding first node < idx? Would probably require some locks
+	// try to get nearest pair that's cached and calculate from their values
+	// TODO: consider using BST to store cached values and finding first node < idx
 	closeIndex := fib.roundDownToPad(idx)
 	for i := 0; i < 10 && closeIndex <= idx; i += 1 {
 		pair, err := fib.cache.Get(closeIndex)
 		if err == nil {
-			// calculate our value from this pair
-			// fmt.Printf("Hit: %v (original %v)\n", closeIndex, idx)
+			fib.countClose()
 			return fib.calcFromPair(closeIndex, pair, idx)
 		}
 		closeIndex -= fib.cachePad
 	}
 
 	// failed to use cache, calculate from zero
-	// fmt.Printf("MISS: %v\n", idx)
+	fib.countMiss()
 	return fib.calcFromZero(idx)
 }

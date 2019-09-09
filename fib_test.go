@@ -90,18 +90,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-// func TestGet(t *testing.T) {
-// 	fib := MakeFibTracker()
-// 	for _, tt := range fibGetTests {
-// 		t.Run(strconv.Itoa(int(tt.index)), func(t *testing.T) {
-// 			val := fib.Get(tt.index)
-// 			if val.String() != tt.expected {
-// 				t.Errorf("Expected (%v) Got (%v)", val, tt.expected)
-// 			}
-// 		})
-// 	}
-// }
-
+// used to prevent complier from optimizing out result
 var result *big.Int
 
 func benchmarkSetNextN(nIter uint32, b *testing.B) {
@@ -137,37 +126,3 @@ func BenchmarkSetNext10000(b *testing.B) {
 func BenchmarkSetNext100000(b *testing.B) {
 	benchmarkSetNextN(100000, b)
 }
-
-// func BenchmarkSync(b *testing.B) {
-// 	var s sync.Mutex
-// 	for i := 0; i < b.N; i++ {
-// 		s.Lock()
-// 		s.Unlock()
-// 	}
-// }
-
-// func benchmarkHashicorpCacheN(size, nIter int, b *testing.B) {
-// 	var c *lru.Cache
-// 	var err error
-// 	for n := 0; n < b.N; n++ {
-// 		c, err = lru.New(size)
-// 		if err != nil {
-// 			b.Fatal(err)
-// 		}
-// 		for i := 0; i < nIter; i++ {
-// 			c.Add(i, i)
-// 		}
-// 	}
-// }
-
-// func BenchmarkHashicorpCache10(b *testing.B) {
-// 	benchmarkHashicorpCacheN(10, 10, b)
-// }
-
-// func BenchmarkHashicorpCache100(b *testing.B) {
-// 	benchmarkHashicorpCacheN(10, 100, b)
-// }
-
-// func BenchmarkHashicorpCache1000(b *testing.B) {
-// 	benchmarkHashicorpCacheN(10, 1000, b)
-// }
