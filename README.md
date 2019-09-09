@@ -3,7 +3,7 @@
 API for serving values from the Fibonacci sequence.
 
 ## Usage
-If you have go installed, you can clone the repo, build it.
+If you have go installed, you can clone the repo, build it, and run it.
 ```
 git clone git@github.com:macintoshpie/fibapi.git &&
   cd fibapi &&
