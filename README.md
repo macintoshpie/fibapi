@@ -8,12 +8,12 @@ If you have go installed, you can clone the repo, build it.
 git clone git@github.com:macintoshpie/fibapi.git &&
   cd fibapi &&
   go build . &&
-  ./fibapi
+  ./fibapi -port 8080
 ```
 
 ## Comments
 ### Server implementation
-The server is a basic `net/http` server, all in `main.go`. Atomic methods are used for manipulating the current index, and the json encoder for writing responses. The api supports recovery by occasionally writing the current index to a file, which it attempts to read on each startup.
+The server is a basic `net/http` server, all in `main.go`. Atomic methods are used for manipulating the current index, and the json encoder for writing responses. The api supports recovery by occasionally writing the current index to a file, which it attempts to read on each startup. Debugging endpoints were added to get info about the cache as well as profiling info.
 ### Caching implementation
 A few different caches were tried including fastcache, hashicorp's lru, and a simple slice. After doing some profiling, it was determined the slice was more performant.  
 For the caching strategy, I decided that only caching the "result values" (those returned in API response) was a problematic approach. For example, if our cache holds `n` values and we've made `k` calls, `k >> n`, to the `/next` endpoint we'd have the `n` most recent values in cache. If we then make `n` calls to `/previous`, any following calls to `/previous` will result in a full cache miss and the value must be calculated. This could be very expensive if our current index is a very high number.  
@@ -65,8 +65,8 @@ Running 2m test @ http://127.0.0.1:8080/current
 Requests/sec:    453.65
 Transfer/sec:      9.11MB
 ```
-#### `Mix of all endpoints`
-For this test, a random sequence of 1000 requests to each endpoint was used with the http_load tool. Unfortunately the load testing tool doesn't work very well and it dropped requsts frequently. As a result it reported about 500 requests per second. I really believe these poor results are due to the tool, and that it's probably capable of at least 1000 rps. I'd like to find a better tool for testing multiple URLs (siege seems like a good option).
+#### Mix of all endpoints
+For this test, a random sequence of 1000 requests to each endpoint was used with the http_load tool. Unfortunately http_load doesn't seem to work very well. As a result it reported about 500 requests per second. I really believe these poor results are due to the tool, and that it's probably capable of at least 1000 rps. I'd like to find a better tool for testing multiple URLs (siege seems like a good option).
 ```
 49134 fetches, 12 max parallel, 1.74852e+06 bytes, in 90.0042 seconds
 35.5867 mean bytes/connection
@@ -95,6 +95,6 @@ Showing top 10 nodes out of 56
       50ms  1.52% 88.75%       50ms  1.52%  internal/poll.runtime_pollSetDeadline
       40ms  1.22% 89.97%       40ms  1.22%  math/big.greaterThan
 ```
-Converting the big.Ints into strings was the most costly operating we were doing.  
+Converting the big.Ints into strings was the most costly operation.  
 After running some tests, I found that writing `[]byte` could be more than 2x faster and implemented my own basic addition on the slices. But in the end my method of adding digits was too slow so I had to scrap it.  
 I think the solution to this problem could be a smarter implementation of the `[]byte` storing and addition, but I'd have to take a deeper look at go's big.nat implementation to see how they accomplish fast addition.
