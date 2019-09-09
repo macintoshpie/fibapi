@@ -2,7 +2,7 @@
 ## tldr;
 API for serving values from the Fibonacci sequence.
 
-## Usage
+## Setup
 If you have go installed, you can clone the repo, build it, and run it.
 ```
 git clone git@github.com:macintoshpie/fibapi.git &&
@@ -10,6 +10,20 @@ git clone git@github.com:macintoshpie/fibapi.git &&
   go build . &&
   ./fibapi -port 8080
 ```
+
+## Usage
+Use a `GET` request to any of the following endpoints. A JSON response is provided:
+```
+"index": (uint32) index of API request 
+"value": (string) value of fibonacci sequence at index
+```
+### Endpoints
+#### `/current`
+Get current index and value
+#### `/next`
+Increment index and get the value
+#### `/previous`
+Decrement index and get the value
 
 ## Comments
 ### Server implementation
