@@ -128,7 +128,8 @@ func (s *server) logCurrentIndex(seconds time.Duration) {
 
 func main() {
 	var port *uint = flag.Uint("port", 80, "port on which to expose the API")
-	var backupPath *string = flag.String("backup", "fibapi_backup", "file to journal sequence index to")
+	var backupPath *string = flag.String("file", "fibapi_backup", "file to journal sequence index to")
+	var backupSeconds *uint = flag.Uint("seconds", 3, "seconds between each backup")
 	flag.Parse()
 
 	// create fibonacci tracker
@@ -179,7 +180,7 @@ func main() {
 	}
 
 	// start logger and server
-	go fibServer.logCurrentIndex(3 * time.Second)
+	go fibServer.logCurrentIndex(time.Duration(*backupSeconds) * time.Second)
 
 	log.Printf("Serving at %v\n", address)
 	log.Fatal(httpServer.ListenAndServe())
