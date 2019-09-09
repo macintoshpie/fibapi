@@ -26,8 +26,8 @@ type server struct {
 }
 
 // Make server for fibonacci api
-func makeServer(fib *FibTracker, backup *os.File, debug bool) *server {
-	s := &server{0, fib, debug, backup}
+func makeServer(fib *FibTracker, backup *os.File, startIdx uint32, debug bool) *server {
+	s := &server{startIdx, fib, debug, backup}
 	return s
 }
 
@@ -140,6 +140,7 @@ func main() {
 	fib := MakeFibTracker(10, hc)
 
 	// setup the backup file
+	startIdx := uint32(0)
 	var backupFile *os.File
 	_, err = os.Stat(*backupPath)
 	if os.IsNotExist(err) {
@@ -154,10 +155,18 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		startIdxBytes := make([]byte, 4)
+		n, err := backupFile.Read(startIdxBytes)
+		if err != nil || n != 4 {
+			log.Printf("Failed reading backup: %v\n", err)
+		} else {
+			startIdx = binary.LittleEndian.Uint32(startIdxBytes)
+		}
 	}
+	log.Printf("Starting sequence index at %v\n", startIdx)
 
 	// create the server and routes
-	fibServer := makeServer(fib, backupFile, true)
+	fibServer := makeServer(fib, backupFile, startIdx, true)
 	router := fibServer.makeRouter()
 	address := fmt.Sprintf(":%d", *port)
 
@@ -166,17 +175,6 @@ func main() {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		Handler:      router,
-	}
-
-	// set starting index
-	bs := make([]byte, 4)
-	n, err := fibServer.backup.Read(bs)
-	if err != nil || n != 4 {
-		log.Printf("Failed reading backup: %v\n", err)
-		log.Println("Starting sequence index at zero")
-	} else {
-		fibServer.currentIndex = binary.LittleEndian.Uint32(bs)
-		log.Printf("Starting sequence index at %v\n", fibServer.currentIndex)
 	}
 
 	// start logger and server
